@@ -19,6 +19,7 @@ type Distribution struct {
     // data   []int
     collect_data []int
     total  int
+    num_reuse int
 }
 
 func NewDistribution(sample_num int, numBins int) *Distribution {
@@ -46,6 +47,10 @@ func (d *Distribution)InitDistribution() {
   for _, num := range d.collect_data {
     d.Add(num)
   }
+}
+
+func (d *Distribution) PrintReuseRate() {
+  log.Printf("reuseRate : %f", float64(d.num_reuse) / float64(d.total))
 }
 
 func (d *Distribution) Add(x int) {
@@ -96,9 +101,9 @@ func (d *Distribution) GetQuantiles(p float64) int {
   for i := range d.counts {
     sum += d.counts[i]
     if(float64(sum) / float64(d.total) > p) {
-      return d.bins[i]
+      return (d.bins[i] + d.bins[i+1]) / 2
     }
   }
 
-  return d.bins[len(d.bins) - 1]
+  return (d.bins[len(d.bins) - 2] + d.bins[len(d.bins) - 1]) / 2
 }

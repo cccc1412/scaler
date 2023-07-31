@@ -21,14 +21,12 @@ type Config struct {
   PreloadInterval      int
   GcDuration           time.Duration
   PreloadDuration      time.Duration
-  IdleDurationBeforeGC time.Duration
 }
 
 var DefaultConfig = Config{
 	ClientAddr:           "127.0.0.1:50051",
-	KeepAliveInterval:    3 * 1000 * 1000,
+	KeepAliveInterval:    3 * 100 * 1000,
   PreloadInterval:       0, 
-  GcDuration: 1 * time.Millisecond,
-  PreloadDuration: 1 * time.Millisecond,
-	IdleDurationBeforeGC: 5 * time.Minute,
+  GcDuration: 100 * time.Millisecond,
+  PreloadDuration: 100 * time.Millisecond,
 }
