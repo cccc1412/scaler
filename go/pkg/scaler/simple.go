@@ -35,6 +35,7 @@ type InstanceConfig struct {
   InsertTime time.Time
   Meta  *model2.Meta
   InitTime  int //ms
+  Imm       bool
 }
 
 type Simple struct {
@@ -87,7 +88,7 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
 }
 
 //返回的是实例,每类app都会有一个独立的scaler
-func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.AssignReply, error) {
+func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest, req_total int) (*pb.AssignReply, error) {
   start := time.Now()
 	startTs := start.UnixMilli()
   if s.lastCallEndTs != 0 {
@@ -97,7 +98,7 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
     s.hist.PrintReuseRate()
     log.Printf("hist mean : %f, cv : %f", s.hist.mean, s.hist.CV())
     if(s.hist.collected && s.hist.CV() > 5) {
-      s.config.PreloadInterval = s.hist.GetQuantiles(0.05)
+      // s.config.PreloadInterval = s.hist.GetQuantiles(0.05)
       // s.config.KeepAliveInterval = s.hist.GetQuantiles(0.95)
       log.Printf("window update : %d , %d, cv : %f", s.config.PreloadInterval, s.config.KeepAliveInterval, s.hist.CV())
     }
@@ -114,6 +115,10 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 		instance := element.Value.(*model2.Instance) //返回这个示例
 		instance.Busy = true
     s.hist.num_reuse++
+    if(s.idleInstance.Len() == 1) {
+      s.AddPreloadList(start, instance.Meta, int(instance.InitDurationInMs), true)
+      log.Printf("AddPreloadList : meta mem : %d", instance.Meta.MemoryInMb)
+    }
 		s.idleInstance.Remove(element)
 		s.mu.Unlock()
 		log.Printf("Assign, request id: %s, instance %s reused", request.RequestId, instance.Id)
@@ -161,6 +166,9 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 	s.mu.Lock()
 	instance.Busy = true
 	s.instances[instance.Id] = instance
+  s.AddPreloadList(start, instance.Meta, int(instance.InitDurationInMs), true)
+  log.Printf("AddPreloadList : meta mem : %d", instance.Meta.MemoryInMb)
+
 	s.mu.Unlock()
 	log.Printf("request id: %s, instance %s for app %s is created, init latency: %dms", request.RequestId, instance.Id, instance.Meta.Key, instance.InitDurationInMs)
 
@@ -208,11 +216,12 @@ func (s *Simple) Preload(ctx context.Context, meta *model2.Meta) error{
   return err
 }
 
-func (s *Simple) AddPreloadList(t time.Time, meta *model2.Meta, initTime int) {
+func (s *Simple) AddPreloadList(t time.Time, meta *model2.Meta, initTime int, imm bool) {
   InstanceConfig := InstanceConfig{
     InsertTime: t,
     Meta: meta,
     InitTime: initTime,
+    Imm: imm,
   }
   log.Printf("waiting for insert preloadList")
   // s.mu.Lock()
@@ -257,7 +266,7 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 	if instance := s.instances[instanceId]; instance != nil {
 		slotId = instance.Slot.Id
 		if needDestroy {
-      s.AddPreloadList(start, instance.Meta, int(instance.InitDurationInMs))
+      s.AddPreloadList(start, instance.Meta, int(instance.InitDurationInMs), false)
 			log.Printf("request id %s, instance %s need be destroy", request.Assigment.RequestId, instanceId)
 			return reply, nil
 		}
@@ -369,11 +378,11 @@ func (s *Simple) preloadLoop() {
         instanceConfig := element.Value.(InstanceConfig)
         preloadDuration := time.Now().Sub(instanceConfig.InsertTime) / 1000000 //ms
         log.Printf("check preload, preloadDuration : %d, s.config.PreloadInterval: %d", preloadDuration, time.Duration(s.config.PreloadInterval))
-        if preloadDuration > time.Duration(s.config.PreloadInterval - instanceConfig.InitTime) {
+        if instanceConfig.Imm == true || preloadDuration > time.Duration(s.config.PreloadInterval - instanceConfig.InitTime) {
           ctx := context.Background()
+          s.Preload(ctx, instanceConfig.Meta)
           s.preloadList.Remove(element)
           s.mu.Unlock()
-          s.Preload(ctx, instanceConfig.Meta)
           log.Printf("Preload execute, preloadDuration : %d", preloadDuration)
         } else {
           s.mu.Unlock()

@@ -6,8 +6,57 @@ import (
 	"math"
 	"sort"
 )
+type RingBuffer struct {
+	size int
+	head int
+	tail int
+	data []int
+}
+
+func NewRingBuffer(size int) *RingBuffer {
+	return &RingBuffer{
+		size: size,
+		data: make([]int, size),
+	}
+}
+
+func (rb *RingBuffer) IsEmpty() bool {
+	return rb.head == rb.tail
+}
+
+func (rb *RingBuffer) IsFull() bool {
+	return (rb.tail+1)%rb.size == rb.head
+}
+
+func (rb *RingBuffer) Enqueue(value int) bool {
+	if rb.IsFull() {
+		return false
+	}
+	rb.data[rb.tail] = value
+	rb.tail = (rb.tail + 1) % rb.size
+	return true
+}
+
+func (rb *RingBuffer) Dequeue() (int, bool) {
+	if rb.IsEmpty() {
+		return 0, false
+	}
+	value := rb.data[rb.head]
+	rb.head = (rb.head + 1) % rb.size
+	return value, true
+}
+
+func (rb *RingBuffer) Last() (int, bool) {
+	if rb.IsEmpty() {
+		return 0, false
+	}
+	index := (rb.tail + rb.size - 1) % rb.size
+	return rb.data[index], true
+}
 
 type Distribution struct {
+    assgin_ts RingBuffer
+    idle_ts RingBuffer  
     collected bool
     sample_num int 
     cur_sample int
@@ -24,6 +73,8 @@ type Distribution struct {
 
 func NewDistribution(sample_num int, numBins int) *Distribution {
   return &Distribution{
+    assgin_ts: *NewRingBuffer(100),
+    idle_ts: *NewRingBuffer(100),
     collected: false,
     bins: make([]int, numBins+1),
     collect_data: make([]int, sample_num),
@@ -51,6 +102,24 @@ func (d *Distribution)InitDistribution() {
 
 func (d *Distribution) PrintReuseRate() {
   log.Printf("reuseRate : %f", float64(d.num_reuse) / float64(d.total))
+}
+
+
+func (d *Distribution) AddAssignTs(x int) {
+  d.assgin_ts.Enqueue(x)
+}
+
+func (d *Distribution) AddIdleTs(x int) {
+  d.idle_ts.Enqueue(x)
+}
+
+func (d *Distribution) IsPreload() bool {
+  last_assign_ts, _ := d.assgin_ts.Last()
+  last_idle_ts, _ := d.idle_ts.Last()
+  if(last_assign_ts < last_idle_ts) {
+    return true
+  }
+  return false
 }
 
 func (d *Distribution) Add(x int) {
