@@ -12,9 +12,11 @@ RUN go build -o scaler cmd/scaler/main.go
 
 # In the second stage, we'll use a small, lightweight base image.
 FROM registry.cn-beijing.aliyuncs.com/cloudnative-challenge/ubuntu:latest
+# FROM python:3.8.5-slim-buster
 
 # Update the package list and install required packages.
 RUN apt-get update && apt-get install -y netcat curl
+# RUN pip install pmdarima
 
 # Set the working directory to /app.
 WORKDIR /app
@@ -29,5 +31,8 @@ COPY --from=builder /build /app/source
 # Copy the startup script.
 COPY run.sh run.sh
 RUN chmod +x run.sh
+# COPY ./py/model.py model.py
+# RUN chmod +x model.py
+# CMD ["python", "model.py"]
 
 

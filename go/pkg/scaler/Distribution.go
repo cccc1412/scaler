@@ -69,6 +69,7 @@ type Distribution struct {
     collect_data []int
     total  int
     num_reuse int
+    moving_ave  float64
 }
 
 func NewDistribution(sample_num int, numBins int) *Distribution {
@@ -84,20 +85,31 @@ func NewDistribution(sample_num int, numBins int) *Distribution {
   }
 }
 
+func (d *Distribution) PrintDistribution() {
+  debug_str := "Distribution init:"
+  for i := range d.counts {
+    debug_str += fmt.Sprint(d.counts[i]) + ", " 
+  }
+  log.Printf(debug_str)
+}
+
 func (d *Distribution)InitDistribution() {
   sort.Ints(d.collect_data)
 	min := d.collect_data[0]
 	max := d.collect_data[d.sample_num - 1]
 
-  log.Printf("Distribution init, min = %d, max = %d", min, max)
+  log.Printf("Distribution init, min = %d, max = %d, cv = %f", min, max, d.CV())
+  debug_str := "Distribution init"
   width := (max - min) / d.num_bins 
   for i := range d.bins {
     d.bins[i] = min + i*width
+    debug_str += fmt.Sprint(d.bins[i]) + ", "
   }
-
+  log.Printf(debug_str)
   for _, num := range d.collect_data {
     d.Add(num)
   }
+  d.PrintDistribution()
 }
 
 func (d *Distribution) PrintReuseRate() {
@@ -135,6 +147,7 @@ func (d *Distribution) Add(x int) {
     // 找到 x 所在的桶
   if(d.collected) {
     // d.data = append(d.data, x)
+    d.moving_ave = 0.2 * d.moving_ave + 0.8 * float64(x)
     d.total ++
     fmt.Println("total:", d.total)
     i := sort.SearchInts(d.bins, x)
