@@ -5,55 +5,93 @@ import (
 	"log"
 	"math"
 	"sort"
+  "errors"
 )
+
+
+// RingBuffer represents a ring buffer.
 type RingBuffer struct {
-	size int
-	head int
-	tail int
-	data []int
+	buffer []int
+	size   int
+	head   int
+	tail   int
 }
 
+// NewRingBuffer creates a new ring buffer with the specified size.
 func NewRingBuffer(size int) *RingBuffer {
 	return &RingBuffer{
-		size: size,
-		data: make([]int, size),
+		buffer: make([]int, size),
+		size:   size,
+		head:   -1,
+		tail:   -1,
 	}
 }
 
+// IsEmpty checks if the ring buffer is empty.
 func (rb *RingBuffer) IsEmpty() bool {
-	return rb.head == rb.tail
+	return rb.head == -1
 }
 
+// IsFull checks if the ring buffer is full.
 func (rb *RingBuffer) IsFull() bool {
 	return (rb.tail+1)%rb.size == rb.head
 }
 
-func (rb *RingBuffer) Enqueue(value int) bool {
+// Enqueue adds a value to the ring buffer.
+func (rb *RingBuffer) Enqueue(value int) error {
 	if rb.IsFull() {
-		return false
+		return errors.New("Ring buffer is full")
 	}
-	rb.data[rb.tail] = value
+
+	if rb.IsEmpty() {
+		rb.head = 0
+	}
+
 	rb.tail = (rb.tail + 1) % rb.size
-	return true
+	rb.buffer[rb.tail] = value
+
+	return nil
 }
 
-func (rb *RingBuffer) Dequeue() (int, bool) {
+// Dequeue removes and returns a value from the ring buffer.
+func (rb *RingBuffer) Dequeue() (int, error) {
 	if rb.IsEmpty() {
-		return 0, false
+		return 0, errors.New("Ring buffer is empty")
 	}
-	value := rb.data[rb.head]
-	rb.head = (rb.head + 1) % rb.size
-	return value, true
+
+	value := rb.buffer[rb.head]
+
+	if rb.head == rb.tail {
+		rb.head = -1
+		rb.tail = -1
+	} else {
+		rb.head = (rb.head + 1) % rb.size
+	}
+
+	return value, nil
 }
 
-func (rb *RingBuffer) Last() (int, bool) {
+// ToArray converts the ring buffer to an array.
+func (rb *RingBuffer) ToArray() []int {
 	if rb.IsEmpty() {
-		return 0, false
+		return []int{}
 	}
-	index := (rb.tail + rb.size - 1) % rb.size
-	return rb.data[index], true
-}
 
+	if rb.head <= rb.tail {
+		return rb.buffer[rb.head : rb.tail+1]
+	}
+
+	return append(rb.buffer[rb.head:], rb.buffer[:rb.tail+1]...)
+}
+func intToFloatArray(intArray []int) []float64 {
+	floatArray := make([]float64, len(intArray))
+
+	for i, val := range intArray {
+		floatArray[i] = float64(val)
+	}
+
+	return floatArray
+}
 type Distribution struct {
     assgin_ts RingBuffer
     idle_ts RingBuffer  
@@ -69,7 +107,6 @@ type Distribution struct {
     collect_data []int
     total  int
     num_reuse int
-    moving_ave  float64
 }
 
 func NewDistribution(sample_num int, numBins int) *Distribution {
@@ -125,14 +162,14 @@ func (d *Distribution) AddIdleTs(x int) {
   d.idle_ts.Enqueue(x)
 }
 
-func (d *Distribution) IsPreload() bool {
-  last_assign_ts, _ := d.assgin_ts.Last()
-  last_idle_ts, _ := d.idle_ts.Last()
-  if(last_assign_ts < last_idle_ts) {
-    return true
-  }
-  return false
-}
+// func (d *Distribution) IsPreload() bool {
+//   last_assign_ts, _ := d.assgin_ts.Last()
+//   last_idle_ts, _ := d.idle_ts.Last()
+//   if(last_assign_ts < last_idle_ts) {
+//     return true
+//   }
+//   return false
+// }
 
 func (d *Distribution) Add(x int) {
   if(!d.collected) {
@@ -147,9 +184,8 @@ func (d *Distribution) Add(x int) {
     // 找到 x 所在的桶
   if(d.collected) {
     // d.data = append(d.data, x)
-    d.moving_ave = 0.2 * d.moving_ave + 0.8 * float64(x)
     d.total ++
-    fmt.Println("total:", d.total)
+    // fmt.Println("total:", d.total)
     i := sort.SearchInts(d.bins, x)
     if i == len(d.bins) {
         i--
@@ -161,7 +197,7 @@ func (d *Distribution) Add(x int) {
       i--
     }
     // 更新统计信息
-    fmt.Println("i:", i)
+    // fmt.Println("i:", i)
     d.counts[i]++
     delta := float64(x) - d.mean
     d.mean += delta / float64(d.total)

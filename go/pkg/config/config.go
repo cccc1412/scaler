@@ -27,6 +27,6 @@ var DefaultConfig = Config{
 	ClientAddr:           "127.0.0.1:50051",
 	KeepAliveInterval:    3 * 100 * 1000,
   PreloadInterval:       0, 
-  GcDuration: 10 * 1000 * time.Millisecond,
-  PreloadDuration: 10 * 1000 * time.Millisecond,
+  GcDuration: 1 * 1000 * time.Millisecond,
+  PreloadDuration: 1 * 1000 * time.Millisecond,
 }
