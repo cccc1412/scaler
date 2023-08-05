@@ -5,15 +5,16 @@ import (
 	"log"
 	"math"
 	"sort"
-  "errors"
+  // "errors"
 )
 
 
 // RingBuffer represents a ring buffer.
 type RingBuffer struct {
+  full bool
 	buffer []int
 	size   int
-	head   int
+	// head   int
 	tail   int
 }
 
@@ -22,54 +23,58 @@ func NewRingBuffer(size int) *RingBuffer {
 	return &RingBuffer{
 		buffer: make([]int, size),
 		size:   size,
-		head:   -1,
+		// head:   -1,
 		tail:   -1,
+    full: false,
 	}
 }
 
-// IsEmpty checks if the ring buffer is empty.
+// // IsEmpty checks if the ring buffer is empty.
 func (rb *RingBuffer) IsEmpty() bool {
-	return rb.head == -1
+	return rb.tail == -1
 }
 
-// IsFull checks if the ring buffer is full.
-func (rb *RingBuffer) IsFull() bool {
-	return (rb.tail+1)%rb.size == rb.head
-}
+// // IsFull checks if the ring buffer is full.
+// func (rb *RingBuffer) IsFull() bool {
+// 	return (rb.tail+1)%rb.size == rb.head
+// }
 
 // Enqueue adds a value to the ring buffer.
 func (rb *RingBuffer) Enqueue(value int) error {
-	if rb.IsFull() {
-		return errors.New("Ring buffer is full")
-	}
+	// if rb.IsFull() {
+	// 	return errors.New("Ring buffer is full")
+	// }
 
-	if rb.IsEmpty() {
-		rb.head = 0
-	}
+	// if rb.IsEmpty() {
+	// 	rb.head = 0
+	// }
 
 	rb.tail = (rb.tail + 1) % rb.size
 	rb.buffer[rb.tail] = value
+  if(rb.tail == rb.size - 1) {
+    rb.full = true
+  }
 
 	return nil
 }
 
-// Dequeue removes and returns a value from the ring buffer.
-func (rb *RingBuffer) Dequeue() (int, error) {
-	if rb.IsEmpty() {
-		return 0, errors.New("Ring buffer is empty")
-	}
+// // Dequeue removes and returns a value from the ring buffer.
+// func (rb *RingBuffer) Dequeue() (int, error) {
+// 	if rb.IsEmpty() {
+// 		return 0, errors.New("Ring buffer is empty")
+// 	}
 
-	value := rb.buffer[rb.head]
+// 	value := rb.buffer[rb.head]
 
-	if rb.head == rb.tail {
-		rb.head = -1
-		rb.tail = -1
-	} else {
-		rb.head = (rb.head + 1) % rb.size
-	}
+// 	if rb.head == rb.tail {
+// 		rb.head = -1
+// 		rb.tail = -1
+// 	} else {
+// 		rb.head = (rb.head + 1) % rb.size
+// 	}
 
-	return value, nil
-}
+// 	return value, nil
+// }
 
 // ToArray converts the ring buffer to an array.
 func (rb *RingBuffer) ToArray() []int {
@@ -77,11 +82,11 @@ func (rb *RingBuffer) ToArray() []int {
 		return []int{}
 	}
 
-	if rb.head <= rb.tail {
-		return rb.buffer[rb.head : rb.tail+1]
-	}
-
-	return append(rb.buffer[rb.head:], rb.buffer[:rb.tail+1]...)
+	if !rb.full {
+		return rb.buffer[0 : rb.tail+1]
+	} else {
+    return append(rb.buffer[rb.tail+1:], rb.buffer[:rb.tail+1]...)
+  }
 }
 func intToFloatArray(intArray []int) []float64 {
 	floatArray := make([]float64, len(intArray))
