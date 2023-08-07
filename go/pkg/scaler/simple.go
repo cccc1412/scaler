@@ -159,7 +159,6 @@ func (s *Simple) delayAssignLoop(delay_req *pb.AssignRequest) (*pb.AssignReply, 
 		    	},
 			    ErrorMessage: nil,
 		    }, nil
-    
     } else {
       s.mu.Unlock()
       time.Sleep(20 * time.Millisecond)
@@ -225,7 +224,6 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest, req_tota
  //        if(s.idleInstance.Len() <  s.pred_running && s.pred_running > s.running_cnt) {
  //          log.Printf("preload, reason : s.idleInstance.Len() <  s.pred_running && s.pred_running > s.running_cnt , idle_len : %d, pre_running : %d, running_cnt : %d", s.idleInstance.Len(), s.pred_running, s.running_cnt)
  //          s.Preload(context.Background())
- //        }
  //      }()
  //    }
 	// 	log.Printf("Assign, request id: %s, instance id: %s, cost %dms", request.RequestId, instanceId, time.Since(start).Milliseconds())
@@ -633,6 +631,15 @@ func (s *Simple) preloadLoop() {
       // s.pred_running = int(tmp / float64(len(predictions)))
       s.pred_running = int(my_model.Predict(s.metaData.Key ,intToInt32Array(data_for_arima)))
       log.Printf("lgbm predict : %d", s.pred_running)
+      if(s.pred_running == -1) {
+        predictions := predictARIMA(intToFloatArray(data_for_arima), s.p, s.d, s.q, 1)
+        tmp := 0.0
+        end := data_for_arima[len(data_for_arima) - 1]
+        for _, pred := range predictions {
+          tmp += pred + float64(end)
+        }
+        s.pred_running = int(tmp / float64(len(predictions)))
+      }
       if(s.preloading_cnt + s.idleInstance.Len() + s.running_cnt<  s.pred_running ) {
         needPreload = true
         preload_num = s.pred_running - s.idleInstance.Len() - s.running_cnt - s.preloading_cnt
