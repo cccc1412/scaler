@@ -32,14 +32,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type InstanceConfig struct {
-  InsertTime time.Time
-  Meta  *model2.Meta
-  InitTime  int //ms
-  Imm       bool
-}
-
-type Simple struct {
+type Water struct {
   hist           Distribution
   lastCallStartTs  int64
 	config         *config.Config
@@ -62,8 +55,6 @@ type Simple struct {
   dt_time        int64
   cold_start_cnt int
   assign_cnt     int
-  assign_cnt_interval int
-  max_running_interval_for_gc int
   reuse_cnt      int
   preloading_cnt int
   start_time     map[string]int64
@@ -78,12 +69,12 @@ type Simple struct {
 }
 
 
-func New(metaData *model2.Meta, config *config.Config) Scaler {
+func NewWater(metaData *model2.Meta, config *config.Config) Scaler {
 	client, err := platform_client2.New(config.ClientAddr)
 	if err != nil {
 		log.Fatalf("client init with error: %s", err.Error())
 	}
-	scheduler := &Simple{
+	scheduler := &Water{
     hist: *NewDistribution(100, 200),
     lastCallStartTs: 0,
 		config:         config,
@@ -105,7 +96,7 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
     q : 1,
 	}
   log.Printf("New scaler : key %s, mem %d, timeout %d, runtime: %s", metaData.GetKey(), metaData.GetMemoryInMb(), metaData.GetTimeoutInSecs(), metaData.GetRuntime())
-	scheduler.wg.Add(2)
+	scheduler.wg.Add(3)
 	go func() {
 		defer scheduler.wg.Done()
 		scheduler.gcLoop()
@@ -130,7 +121,7 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
 	return scheduler
 }
 
-func (s *Simple) delayAssignLoop(delay_req *pb.AssignRequest) (*pb.AssignReply, error) {
+func (s *Water) delayAssignLoop(delay_req *pb.AssignRequest) (*pb.AssignReply, error) {
   for {
     s.mu.Lock()
     if element := s.idleInstance.Front(); element != nil { //idel列表不为空,取队头
@@ -146,9 +137,6 @@ func (s *Simple) delayAssignLoop(delay_req *pb.AssignRequest) (*pb.AssignReply, 
         if(s.running_cnt > s.max_running_interval) {
           s.max_running_interval = s.running_cnt
         }
-        if(s.running_cnt > s.max_running_interval_for_gc) {
-          s.max_running_interval_for_gc = s.running_cnt
-        } 
     
 		    s.mu.Unlock()
 		    log.Printf("delay assign succeed, request id: %s, instance %s reused", delay_req.RequestId, instance.Id)
@@ -172,10 +160,9 @@ func (s *Simple) delayAssignLoop(delay_req *pb.AssignRequest) (*pb.AssignReply, 
 }
 
 //返回的是实例,每类app都会有一个独立的scaler
-func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest, req_total int) (*pb.AssignReply, error) {
+func (s *Water) Assign(ctx context.Context, request *pb.AssignRequest, req_total int) (*pb.AssignReply, error) {
   s.mu.Lock()
   s.assign_cnt++
-  s.assign_cnt_interval++
   s.mu.Unlock()
   log.Printf("assign for metaKey : %s, cur state, running_cnt : %d, idle_cnt : %d, instance_cnt : %d, max_running : %d, keepalive window: %d, preloading_cnt : %d", s.metaData.Key, s.running_cnt, s.idleInstance.Len(), s.instance_cnt, s.max_running, s.config.KeepAliveInterval, s.preloading_cnt)
   log.Printf("moving average cur state, exe_time :%d, assign_time: %d, dt :%d", s.exe_time, s.assign_time, s.dt_time)
@@ -254,9 +241,7 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest, req_tota
     if(s.running_cnt > s.max_running_interval) {
       s.max_running_interval = s.running_cnt
     }
-    if(s.running_cnt > s.max_running_interval_for_gc) {
-      s.max_running_interval_for_gc = s.running_cnt
-    } 
+    
 		s.mu.Unlock()
 		log.Printf("Assign, request id: %s, instance %s reused", request.RequestId, instance.Id)
 		instanceId = instance.Id
@@ -281,16 +266,16 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest, req_tota
   if(s.preloading_cnt > s.waiting_cnt || s.assign_time >= int64(pred_wait_time) && s.metaData.GetTimeoutInSecs()*1000 > uint32(pred_wait_time)){
     s.waiting_cnt++
     log.Printf("delay assign,metaKey : %s ,waiting_cnt : %d, running_cnt : %d, preloading_cnt : %d", s.metaData.Key, s.waiting_cnt, s.running_cnt, s.preloading_cnt)
-    s.mu.Unlock()
     // s.preload_mu.Lock()
-    if(s.preloading_cnt + s.running_cnt < s.waiting_cnt) {
-      for i:=0; i < int(5 * math.Pow(2, s.base)); i++ {
+    if(s.preloading_cnt + s.instance_cnt < s.waiting_cnt) {
+      for i:=0; i < int(math.Pow(2, s.base)); i++ {
         s.base++
         go func() {
           s.Preload(context.Background())
         }()
       }
     }
+    s.mu.Unlock()
     // s.preload_mu.Unlock()
     return s.delayAssignLoop(request)    
   } else {
@@ -298,7 +283,7 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest, req_tota
   }
 
   // if(s.preloading_cnt == 0) {
-    for i:=0; i < int(5 * math.Pow(2, s.base)); i++ {
+    for i:=0; i < int(math.Pow(2, s.base)); i++ {
         s.base++
         go func() {
           s.Preload(context.Background())
@@ -349,9 +334,6 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest, req_tota
   if(s.running_cnt > s.max_running_interval) {
     s.max_running_interval = s.running_cnt
   }
-  if(s.running_cnt > s.max_running_interval_for_gc) {
-    s.max_running_interval_for_gc = s.running_cnt
-  } 
 	s.mu.Unlock()
 	log.Printf("request id: %s, instance %s for app %s is created, init latency: %dms", request.RequestId, instance.Id, instance.Meta.Key, instance.InitDurationInMs)
   s.assign_time = int64(0.2 * float64(s.assign_time) + 0.8 * float64(instance.InitDurationInMs))
@@ -371,7 +353,7 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest, req_tota
 }
 
 //idle 调用
-func (s *Simple) Preload(ctx context.Context) error{
+func (s *Water) Preload(ctx context.Context) error{
   s.mu.Lock()
   s.preloading_cnt++
   s.mu.Unlock()
@@ -416,7 +398,7 @@ func (s *Simple) Preload(ctx context.Context) error{
   return err
 }
 
-func (s *Simple) AddPreloadList(t time.Time, meta *model2.Meta, initTime int, imm bool) {
+func (s *Water) AddPreloadList(t time.Time, meta *model2.Meta, initTime int, imm bool) {
   InstanceConfig := InstanceConfig{
     InsertTime: t,
     Meta: meta,
@@ -428,7 +410,7 @@ func (s *Simple) AddPreloadList(t time.Time, meta *model2.Meta, initTime int, im
 }
 
 
-func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleReply, error) {
+func (s *Water) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleReply, error) {
   // go func(ctx context.Context, request *pb.IdleRequest) (*pb.IdleReply, error){
     if request.Assigment == nil {
 	  	return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("assignment is nil"))
@@ -550,14 +532,14 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 
 	}
 
-func (s *Simple) deleteSlot(ctx context.Context, requestId, slotId, instanceId, metaKey, reason string) {
+func (s *Water) deleteSlot(ctx context.Context, requestId, slotId, instanceId, metaKey, reason string) {
 	log.Printf("start delete Instance %s (Slot: %s) of app: %s", instanceId, slotId, metaKey)
 	if err := s.platformClient.DestroySLot(ctx, requestId, slotId, reason); err != nil {
 		log.Printf("delete Instance %s (Slot: %s) of app: %s failed with: %s", instanceId, slotId, metaKey, err.Error())
 	}
 }
 
-func (s *Simple) gcLoop() {
+func (s *Water) gcLoop() {
 	log.Printf("gc loop for app: %s is started", s.metaData.Key)
 	ticker := time.NewTicker(s.config.GcDuration)
 	for range ticker.C {
@@ -583,12 +565,6 @@ func (s *Simple) gcLoop() {
         //   needgc = false
         // }
 
-        if(s.max_running_interval_for_gc > 0 && (s.assign_cnt_interval / s.max_running_interval_for_gc) > 2) {
-          needgc = false
-          s.assign_cnt_interval = 0
-          s.max_running_interval_for_gc = 0
-        }
-
         if(s.pred_running > s.idleInstance.Len() + s.preloading_cnt + s.running_cnt) {
           needgc = false
         }
@@ -598,6 +574,10 @@ func (s *Simple) gcLoop() {
         }
 
         if(s.waiting_cnt > 0) {
+          needgc = false
+        }
+
+        if(s.instance_cnt < 30) {
           needgc = false
         }
 
@@ -625,7 +605,7 @@ func (s *Simple) gcLoop() {
 	}
 }
 
-func (s *Simple) preloadLoop() {
+func (s *Water) preloadLoop() {
   log.Printf("preloadLoop start")
   ticker := time.NewTicker(s.config.PreloadDuration)
   for range ticker.C {
@@ -691,7 +671,7 @@ func (s *Simple) preloadLoop() {
   }
 }
 
-func (s *Simple) Stats() Stats {
+func (s *Water) Stats() Stats {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return Stats{

@@ -23,7 +23,7 @@ import (
   "math"
 	"github.com/AliyunContainerService/scaler/go/pkg/config"
 	model2 "github.com/AliyunContainerService/scaler/go/pkg/model"
-  my_model "github.com/AliyunContainerService/scaler/go/pkg/lgbm"
+  // my_model "github.com/AliyunContainerService/scaler/go/pkg/lgbm"
 	platform_client2 "github.com/AliyunContainerService/scaler/go/pkg/platform_client"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -32,14 +32,14 @@ import (
 	"github.com/google/uuid"
 )
 
-type InstanceConfig struct {
-  InsertTime time.Time
-  Meta  *model2.Meta
-  InitTime  int //ms
-  Imm       bool
-}
+// type InstanceConfig struct {
+//   InsertTime time.Time
+//   Meta  *model2.Meta
+//   InitTime  int //ms
+//   Imm       bool
+// }
 
-type Simple struct {
+type LOW struct {
   hist           Distribution
   lastCallStartTs  int64
 	config         *config.Config
@@ -62,8 +62,6 @@ type Simple struct {
   dt_time        int64
   cold_start_cnt int
   assign_cnt     int
-  assign_cnt_interval int
-  max_running_interval_for_gc int
   reuse_cnt      int
   preloading_cnt int
   start_time     map[string]int64
@@ -78,12 +76,12 @@ type Simple struct {
 }
 
 
-func New(metaData *model2.Meta, config *config.Config) Scaler {
+func NewLow(metaData *model2.Meta, config *config.Config) Scaler {
 	client, err := platform_client2.New(config.ClientAddr)
 	if err != nil {
 		log.Fatalf("client init with error: %s", err.Error())
 	}
-	scheduler := &Simple{
+	scheduler := &LOW{
     hist: *NewDistribution(100, 200),
     lastCallStartTs: 0,
 		config:         config,
@@ -105,32 +103,11 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
     q : 1,
 	}
   log.Printf("New scaler : key %s, mem %d, timeout %d, runtime: %s", metaData.GetKey(), metaData.GetMemoryInMb(), metaData.GetTimeoutInSecs(), metaData.GetRuntime())
-	scheduler.wg.Add(2)
-	go func() {
-		defer scheduler.wg.Done()
-		scheduler.gcLoop()
-		log.Printf("gc loop for app: %s is stoped", metaData.Key)
-	}()
-
-  go func() {
-    defer scheduler.wg.Done()
-    scheduler.preloadLoop()
-    log.Printf("preload loop for app: %s is stoped", metaData.Key)
-  }()
-
-  // go func() {
-  //   defer scheduler.wg.Done()
-  //   for i :=0; i < 20; i++ {
-  //     scheduler.Preload(context.Background())
-  //     log.Printf("preload loop for app: %s is stoped", metaData.Key)
-  //   }
-  // }()
-
 
 	return scheduler
 }
 
-func (s *Simple) delayAssignLoop(delay_req *pb.AssignRequest) (*pb.AssignReply, error) {
+func (s *LOW) delayAssignLoop(delay_req *pb.AssignRequest) (*pb.AssignReply, error) {
   for {
     s.mu.Lock()
     if element := s.idleInstance.Front(); element != nil { //idel列表不为空,取队头
@@ -146,9 +123,6 @@ func (s *Simple) delayAssignLoop(delay_req *pb.AssignRequest) (*pb.AssignReply, 
         if(s.running_cnt > s.max_running_interval) {
           s.max_running_interval = s.running_cnt
         }
-        if(s.running_cnt > s.max_running_interval_for_gc) {
-          s.max_running_interval_for_gc = s.running_cnt
-        } 
     
 		    s.mu.Unlock()
 		    log.Printf("delay assign succeed, request id: %s, instance %s reused", delay_req.RequestId, instance.Id)
@@ -172,10 +146,9 @@ func (s *Simple) delayAssignLoop(delay_req *pb.AssignRequest) (*pb.AssignReply, 
 }
 
 //返回的是实例,每类app都会有一个独立的scaler
-func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest, req_total int) (*pb.AssignReply, error) {
+func (s *LOW) Assign(ctx context.Context, request *pb.AssignRequest, req_total int) (*pb.AssignReply, error) {
   s.mu.Lock()
   s.assign_cnt++
-  s.assign_cnt_interval++
   s.mu.Unlock()
   log.Printf("assign for metaKey : %s, cur state, running_cnt : %d, idle_cnt : %d, instance_cnt : %d, max_running : %d, keepalive window: %d, preloading_cnt : %d", s.metaData.Key, s.running_cnt, s.idleInstance.Len(), s.instance_cnt, s.max_running, s.config.KeepAliveInterval, s.preloading_cnt)
   log.Printf("moving average cur state, exe_time :%d, assign_time: %d, dt :%d", s.exe_time, s.assign_time, s.dt_time)
@@ -254,9 +227,7 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest, req_tota
     if(s.running_cnt > s.max_running_interval) {
       s.max_running_interval = s.running_cnt
     }
-    if(s.running_cnt > s.max_running_interval_for_gc) {
-      s.max_running_interval_for_gc = s.running_cnt
-    } 
+    
 		s.mu.Unlock()
 		log.Printf("Assign, request id: %s, instance %s reused", request.RequestId, instance.Id)
 		instanceId = instance.Id
@@ -283,22 +254,18 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest, req_tota
     log.Printf("delay assign,metaKey : %s ,waiting_cnt : %d, running_cnt : %d, preloading_cnt : %d", s.metaData.Key, s.waiting_cnt, s.running_cnt, s.preloading_cnt)
     s.mu.Unlock()
     // s.preload_mu.Lock()
-    if(s.preloading_cnt + s.running_cnt < s.waiting_cnt) {
-      for i:=0; i < int(5 * math.Pow(2, s.base)); i++ {
-        s.base++
+    if(s.instance_cnt == 0) { 
         go func() {
           s.Preload(context.Background())
         }()
-      }
     }
-    // s.preload_mu.Unlock()
     return s.delayAssignLoop(request)    
   } else {
     s.mu.Unlock()
   }
 
   // if(s.preloading_cnt == 0) {
-    for i:=0; i < int(5 * math.Pow(2, s.base)); i++ {
+    for(s.instance_cnt == 0)  {
         s.base++
         go func() {
           s.Preload(context.Background())
@@ -349,9 +316,6 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest, req_tota
   if(s.running_cnt > s.max_running_interval) {
     s.max_running_interval = s.running_cnt
   }
-  if(s.running_cnt > s.max_running_interval_for_gc) {
-    s.max_running_interval_for_gc = s.running_cnt
-  } 
 	s.mu.Unlock()
 	log.Printf("request id: %s, instance %s for app %s is created, init latency: %dms", request.RequestId, instance.Id, instance.Meta.Key, instance.InitDurationInMs)
   s.assign_time = int64(0.2 * float64(s.assign_time) + 0.8 * float64(instance.InitDurationInMs))
@@ -371,7 +335,7 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest, req_tota
 }
 
 //idle 调用
-func (s *Simple) Preload(ctx context.Context) error{
+func (s *LOW) Preload(ctx context.Context) error{
   s.mu.Lock()
   s.preloading_cnt++
   s.mu.Unlock()
@@ -416,7 +380,7 @@ func (s *Simple) Preload(ctx context.Context) error{
   return err
 }
 
-func (s *Simple) AddPreloadList(t time.Time, meta *model2.Meta, initTime int, imm bool) {
+func (s *LOW) AddPreloadList(t time.Time, meta *model2.Meta, initTime int, imm bool) {
   InstanceConfig := InstanceConfig{
     InsertTime: t,
     Meta: meta,
@@ -428,8 +392,7 @@ func (s *Simple) AddPreloadList(t time.Time, meta *model2.Meta, initTime int, im
 }
 
 
-func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleReply, error) {
-  // go func(ctx context.Context, request *pb.IdleRequest) (*pb.IdleReply, error){
+func (s *LOW) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleReply, error) {
     if request.Assigment == nil {
 	  	return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("assignment is nil"))
 	  }
@@ -539,159 +502,17 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 	  	ErrorMessage: nil,
 	  }, nil
 
- //  }(ctx, request)
-
-
- //  reply := &pb.IdleReply{
-	// 	Status:       pb.Status_Ok,
-	// 	ErrorMessage: nil,
-	// }
- //  return reply ,nil 
 
 	}
 
-func (s *Simple) deleteSlot(ctx context.Context, requestId, slotId, instanceId, metaKey, reason string) {
+func (s *LOW) deleteSlot(ctx context.Context, requestId, slotId, instanceId, metaKey, reason string) {
 	log.Printf("start delete Instance %s (Slot: %s) of app: %s", instanceId, slotId, metaKey)
 	if err := s.platformClient.DestroySLot(ctx, requestId, slotId, reason); err != nil {
 		log.Printf("delete Instance %s (Slot: %s) of app: %s failed with: %s", instanceId, slotId, metaKey, err.Error())
 	}
 }
 
-func (s *Simple) gcLoop() {
-	log.Printf("gc loop for app: %s is started", s.metaData.Key)
-	ticker := time.NewTicker(s.config.GcDuration)
-	for range ticker.C {
-		for {
-			s.mu.Lock()
-			if element := s.idleInstance.Back(); element != nil {
-				instance := element.Value.(*model2.Instance)
-				idleDuration := time.Now().Sub(instance.LastIdleTime) / 1000000
-        // idleDuration := time.Since(instance.LastIdleTime).Milliseconds()
-        // log.Printf("check gc, idleDuration : %d, s.config.KeepAliveIntervalInterval: %d", idleDuration, time.Duration(s.config.KeepAliveInterval))
-
-        needgc := false
-        // if(s.idleInstance.Len() > s.max_running && s.max_running !=0) {
-        //   needgc = true
-        // }
-
-        if(s.config.KeepAliveInterval > 0 && idleDuration > time.Duration(s.config.KeepAliveInterval)) {
-          needgc = true
-        }
-        
-        // if(s.idleInstance.Len() < s.max_running / 2) {
-        //   log.Printf("do not gc, reason : s.idleInstance.Len() < s.max_running / 5,  %d, %d", s.idleInstance.Len(), s.max_running / 5)
-        //   needgc = false
-        // }
-
-        if(s.max_running_interval_for_gc > 0 && (s.assign_cnt_interval / s.max_running_interval_for_gc) > 2) {
-          needgc = false
-          s.assign_cnt_interval = 0
-          s.max_running_interval_for_gc = 0
-        }
-
-        if(s.pred_running > s.idleInstance.Len() + s.preloading_cnt + s.running_cnt) {
-          needgc = false
-        }
-
-        if(s.max_running_interval > s.max_running / 2) {
-          needgc = false
-        }
-
-        if(s.waiting_cnt > 0) {
-          needgc = false
-        }
-
-				if (needgc){
-					//need GC
-          log.Printf("gc, idleDuration : %d, s.config.KeepAliveIntervalInterval: %d", idleDuration, time.Duration(s.config.KeepAliveInterval))
-					s.idleInstance.Remove(element)
-          s.instance_cnt--
-					delete(s.instances, instance.Id)
-					s.mu.Unlock()
-					go func() {
-						reason := fmt.Sprintf("Idle duration: %d, excceed configured duration: %d", idleDuration, s.config.KeepAliveInterval)
-						ctx := context.Background()
-						ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-						defer cancel()
-						s.deleteSlot(ctx, uuid.NewString(), instance.Slot.Id, instance.Id, instance.Meta.Key, reason)
-					}()
-
-					continue
-				}
-			}
-			s.mu.Unlock()
-			break
-		}
-	}
-}
-
-func (s *Simple) preloadLoop() {
-  log.Printf("preloadLoop start")
-  ticker := time.NewTicker(s.config.PreloadDuration)
-  for range ticker.C {
-    s.running_history.Enqueue(s.max_running_interval) 
-    needPreload := false
-    preload_num := 1
-    s.base = 0
-    data_for_arima := s.running_history.ToArray()
-    if(len(data_for_arima) >= 10) {
-      for i := range(data_for_arima) {
-        log.Printf("%d", data_for_arima[i])
-      }
-      // predictions := predictARIMA(intToFloatArray(data_for_arima), s.p, s.d, s.q, 1)
-      // tmp := 0.0
-      // end := data_for_arima[len(data_for_arima) - 1]
-      // for _, pred := range predictions {
-      //   tmp += pred + float64(end)
-      // }
-      // s.pred_running = int(tmp / float64(len(predictions)))
-      s.pred_running = int(my_model.Predict(s.metaData.Key ,intToInt32Array(data_for_arima)))
-      log.Printf("lgbm predict : %d", s.pred_running)
-      if(s.pred_running == -1) {
-        predictions := predictARIMA(intToFloatArray(data_for_arima), s.p, s.d, s.q, 1)
-        tmp := 0.0
-        end := data_for_arima[len(data_for_arima) - 1]
-        for _, pred := range predictions {
-          tmp += pred + float64(end)
-        }
-        s.pred_running = int(tmp / float64(len(predictions)))
-      }
-      if(s.preloading_cnt + s.idleInstance.Len() + s.running_cnt<  s.pred_running ) {
-        needPreload = true
-        preload_num = s.pred_running - s.idleInstance.Len() - s.running_cnt - s.preloading_cnt
-      }
-    } else {
-      s.pred_running = s.max_running_interval
-
-      if(s.preloading_cnt + s.idleInstance.Len() + s.running_cnt<  s.pred_running ) {
-        needPreload = true
-        preload_num = s.pred_running - s.idleInstance.Len() - s.running_cnt - s.preloading_cnt
-      }
-    }
-    s.max_running_interval = 0
-    // preload_num = int(math.Max(float64(preload_num), float64(2 * s.max_running - s.idleInstance.Len() - s.running_cnt - s.preloading_cnt)))
-    // if(s.running_cnt > s.idleInstance.Len() && s.idleInstance.Len() == 0 && float64(s.dt_time) < float64(s.exe_time)) {
-    //   log.Printf("prelod, reason :  s.running_cnt > s.idleInstance.Len() && s.idleInstance.Len() == 0 && float64(s.dt_time) < float64(s.exe_time)")
-    //   needPreload = true
-    // }
-    if(needPreload) {
-      for i := 0; i < preload_num; i++{
-        log.Printf("preload, history_len : %d, pred_running : %d, idle_len : %d, running : %d", len(data_for_arima) ,  s.pred_running, s.idleInstance.Len(), s.running_cnt)
-        go func() {
-          s.Preload(context.Background())
-        }()
-      }
-      // for i := 0; i < preload_num; i++ {
-      //   log.Printf("preload, preload_num : %d, idle_len : %d", preload_num, s.idleInstance.Len())
-      //   s.Preload(context.Background())
-      // }
-    } else {
-      log.Printf("not preload, history_len : %d, pred_running : %d, idle_len : %d, running : %d", len(data_for_arima), s.pred_running, s.idleInstance.Len(), s.running_cnt)
-    }
-  }
-}
-
-func (s *Simple) Stats() Stats {
+func (s *LOW) Stats() Stats {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return Stats{
