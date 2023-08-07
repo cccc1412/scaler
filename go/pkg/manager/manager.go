@@ -685,15 +685,26 @@ func (m *Manager) GetOrCreate(metaData *model.Meta) scaler2.Scaler {
 		return scheduler
 	}
 	log.Printf("Create new scaler for app %s", metaData.Key)
+  // if(my_map[metaData.Key] == 3) {
+  //   var DefaultConfig3 = config.Config{
+	 //    ClientAddr:           "127.0.0.1:50051",
+	 //    KeepAliveInterval:    15 * 60 * 1000,
+  //     // PreloadInterval:       0, 
+  //     GcDuration: 1 * 1000 * time.Millisecond,
+  //     PreloadDuration: 90 * 1000 * time.Millisecond,
+  //   }
+  //   scheduler := scaler2.New3(metaData, &DefaultConfig3)
+  //   m.schedulers[metaData.Key] = scheduler
+	 //  m.rw.Unlock()
+	 //  return scheduler
+  // }
   if(my_map[metaData.Key] == 3) {
-    var DefaultConfig3 = config.Config{
+    var DefaultConfigD3 = config.ConfigD3{
 	    ClientAddr:           "127.0.0.1:50051",
-	    KeepAliveInterval:    15 * 60 * 1000,
-      // PreloadInterval:       0, 
-      GcDuration: 1 * 1000 * time.Millisecond,
-      PreloadDuration: 90 * 1000 * time.Millisecond,
+	    GcInterval:           10 * time.Second,
+	    IdleDurationBeforeGC: 5 * time.Second,
     }
-    scheduler := scaler2.New3(metaData, &DefaultConfig3)
+    scheduler := scaler2.NewD3(metaData, &DefaultConfigD3)
     m.schedulers[metaData.Key] = scheduler
 	  m.rw.Unlock()
 	  return scheduler
@@ -711,7 +722,7 @@ func (m *Manager) GetOrCreate(metaData *model.Meta) scaler2.Scaler {
 	  m.rw.Unlock()
 	  return scheduler
   }
-  if(my_map[metaData.Key] == 4) { //最低水位限制，一次load 10 20 30
+  if(my_map[metaData.Key] == 4) { //最低水位限制，一次load 10 20 30 dataset1
     var DefaultConfig3 = config.Config{
 	    ClientAddr:           "127.0.0.1:50051",
 	    KeepAliveInterval:    15 * 60 * 1000,
@@ -720,6 +731,19 @@ func (m *Manager) GetOrCreate(metaData *model.Meta) scaler2.Scaler {
       PreloadDuration: 90 * 1000 * time.Millisecond,
     }
     scheduler := scaler2.NewWater(metaData, &DefaultConfig3)
+    m.schedulers[metaData.Key] = scheduler
+	  m.rw.Unlock()
+	  return scheduler
+  }
+  if(my_map[metaData.Key] == 5) { //
+    var DefaultConfig3 = config.Config{
+	    ClientAddr:           "127.0.0.1:50051",
+	    KeepAliveInterval:    5 * 60 * 1000,
+      // PreloadInterval:       0, 
+      GcDuration: 1 * 1000 * time.Millisecond,
+      PreloadDuration: 90 * 1000 * time.Millisecond,
+    }
+    scheduler := scaler2.New35c9(metaData, &DefaultConfig3)
     m.schedulers[metaData.Key] = scheduler
 	  m.rw.Unlock()
 	  return scheduler

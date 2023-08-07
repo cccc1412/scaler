@@ -39,7 +39,7 @@ import (
 //   Imm       bool
 // }
 
-type Simple3 struct {
+type XX35c9 struct {
   hist           Distribution
   lastCallStartTs  int64
 	config         *config.Config
@@ -76,12 +76,12 @@ type Simple3 struct {
 }
 
 
-func New3(metaData *model2.Meta, config *config.Config) Scaler {
+func New35c9(metaData *model2.Meta, config *config.Config) Scaler {
 	client, err := platform_client2.New(config.ClientAddr)
 	if err != nil {
 		log.Fatalf("client init with error: %s", err.Error())
 	}
-	scheduler := &Simple3{
+	scheduler := &XX35c9{
     hist: *NewDistribution(100, 200),
     lastCallStartTs: 0,
 		config:         config,
@@ -127,7 +127,7 @@ func New3(metaData *model2.Meta, config *config.Config) Scaler {
 	return scheduler
 }
 
-func (s *Simple3) delayAssignLoop(delay_req *pb.AssignRequest) (*pb.AssignReply, error) {
+func (s *XX35c9) delayAssignLoop(delay_req *pb.AssignRequest) (*pb.AssignReply, error) {
   for {
     s.mu.Lock()
     if element := s.idleInstance.Front(); element != nil { //idel列表不为空,取队头
@@ -166,11 +166,11 @@ func (s *Simple3) delayAssignLoop(delay_req *pb.AssignRequest) (*pb.AssignReply,
 }
 
 //返回的是实例,每类app都会有一个独立的scaler
-func (s *Simple3) Assign(ctx context.Context, request *pb.AssignRequest, req_total int) (*pb.AssignReply, error) {
+func (s *XX35c9) Assign(ctx context.Context, request *pb.AssignRequest, req_total int) (*pb.AssignReply, error) {
   s.mu.Lock()
   s.assign_cnt++
   s.mu.Unlock()
-  log.Printf("assign for metaKey : %s, cur state, running_cnt : %d, idle_cnt : %d, instance_cnt : %d, max_running : %d, keepalive window: %d, preloading_cnt : %d", s.metaData.Key, s.running_cnt, s.idleInstance.Len(), s.instance_cnt, s.max_running, s.config.KeepAliveInterval, s.preloading_cnt)
+  log.Printf("35c9 scheduler , assign for metaKey : %s, cur state, running_cnt : %d, idle_cnt : %d, instance_cnt : %d, max_running : %d, keepalive window: %d, preloading_cnt : %d", s.metaData.Key, s.running_cnt, s.idleInstance.Len(), s.instance_cnt, s.max_running, s.config.KeepAliveInterval, s.preloading_cnt)
   log.Printf("moving average cur state, exe_time :%d, assign_time: %d, dt :%d", s.exe_time, s.assign_time, s.dt_time)
   log.Printf("cur state , reuse rate : %f", float64(s.reuse_cnt) / float64(s.assign_cnt))
   log.Printf("cur state, pred_running : %d", s.pred_running)
@@ -269,20 +269,18 @@ func (s *Simple3) Assign(ctx context.Context, request *pb.AssignRequest, req_tot
   s.metaData.Meta.MemoryInMb = request.MetaData.MemoryInMb
   pred_wait_time := math.Max(float64(s.waiting_cnt/(s.running_cnt + 1)), 1) * float64(s.exe_time)
   // if(s.preloading_cnt > s.waiting_cnt || s.assign_time >= s.exe_time && s.metaData.GetTimeoutInSecs() * 1000 > uint32(s.exe_time) && s.waiting_cnt < s.running_cnt) {
-  if(s.preloading_cnt > s.waiting_cnt || s.exe_time < 3000 && s.assign_time >= int64(pred_wait_time) && s.metaData.GetTimeoutInSecs()*1000 > uint32(pred_wait_time)){
+  if(s.preloading_cnt > s.waiting_cnt || s.assign_time >= int64(pred_wait_time) && s.metaData.GetTimeoutInSecs()*1000 > uint32(pred_wait_time)){
     s.waiting_cnt++
     log.Printf("delay assign,metaKey : %s ,waiting_cnt : %d, running_cnt : %d, preloading_cnt : %d", s.metaData.Key, s.waiting_cnt, s.running_cnt, s.preloading_cnt)
     s.mu.Unlock()
     // s.preload_mu.Lock()
     // if(s.preloading_cnt + s.running_cnt < s.waiting_cnt) {
-    if(pred_wait_time >= float64(2*s.exe_time)) {
       for i:=0; i < 1; i++ {
         s.base++
         go func() {
           s.Preload(context.Background())
         }()
       }
-    }
     // }
     // s.preload_mu.Unlock()
     return s.delayAssignLoop(request)    
@@ -291,12 +289,12 @@ func (s *Simple3) Assign(ctx context.Context, request *pb.AssignRequest, req_tot
   }
 
   // if(s.preloading_cnt == 0) {
-    // for i:=0; i < 2; i++ {
-    //     s.base++
-    //     go func() {
-    //       s.Preload(context.Background())
-    //     }()
-    // }
+    for i:=0; i < 1; i++ {
+        s.base++
+        go func() {
+          s.Preload(context.Background())
+        }()
+    }
   // }
 	//Create new Instance
   s.mu.Lock()
@@ -361,7 +359,7 @@ func (s *Simple3) Assign(ctx context.Context, request *pb.AssignRequest, req_tot
 }
 
 //idle 调用
-func (s *Simple3) Preload(ctx context.Context) error{
+func (s *XX35c9) Preload(ctx context.Context) error{
   s.mu.Lock()
   s.preloading_cnt++
   s.mu.Unlock()
@@ -406,7 +404,7 @@ func (s *Simple3) Preload(ctx context.Context) error{
   return err
 }
 
-func (s *Simple3) AddPreloadList(t time.Time, meta *model2.Meta, initTime int, imm bool) {
+func (s *XX35c9) AddPreloadList(t time.Time, meta *model2.Meta, initTime int, imm bool) {
   InstanceConfig := InstanceConfig{
     InsertTime: t,
     Meta: meta,
@@ -418,7 +416,7 @@ func (s *Simple3) AddPreloadList(t time.Time, meta *model2.Meta, initTime int, i
 }
 
 
-func (s *Simple3) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleReply, error) {
+func (s *XX35c9) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleReply, error) {
   // go func(ctx context.Context, request *pb.IdleRequest) (*pb.IdleReply, error){
     if request.Assigment == nil {
 	  	return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("assignment is nil"))
@@ -540,14 +538,14 @@ func (s *Simple3) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRe
 
 	}
 
-func (s *Simple3) deleteSlot(ctx context.Context, requestId, slotId, instanceId, metaKey, reason string) {
+func (s *XX35c9) deleteSlot(ctx context.Context, requestId, slotId, instanceId, metaKey, reason string) {
 	log.Printf("start delete Instance %s (Slot: %s) of app: %s", instanceId, slotId, metaKey)
 	if err := s.platformClient.DestroySLot(ctx, requestId, slotId, reason); err != nil {
 		log.Printf("delete Instance %s (Slot: %s) of app: %s failed with: %s", instanceId, slotId, metaKey, err.Error())
 	}
 }
 
-func (s *Simple3) gcLoop() {
+func (s *XX35c9) gcLoop() {
 	log.Printf("gc loop for app: %s is started", s.metaData.Key)
 	ticker := time.NewTicker(s.config.GcDuration)
 	for range ticker.C {
@@ -585,6 +583,10 @@ func (s *Simple3) gcLoop() {
           needgc = false
         }
 
+        if(s.max_running > 10 && s.instance_cnt <= 10) {
+          needgc = false
+        }
+
 				if (needgc){
 					//need GC
           log.Printf("gc, idleDuration : %d, s.config.KeepAliveIntervalInterval: %d", idleDuration, time.Duration(s.config.KeepAliveInterval))
@@ -609,7 +611,7 @@ func (s *Simple3) gcLoop() {
 	}
 }
 
-func (s *Simple3) preloadLoop() {
+func (s *XX35c9) preloadLoop() {
   log.Printf("preloadLoop start")
   ticker := time.NewTicker(s.config.PreloadDuration)
   for range ticker.C {
@@ -673,7 +675,7 @@ func (s *Simple3) preloadLoop() {
   }
 }
 
-func (s *Simple3) Stats() Stats {
+func (s *XX35c9) Stats() Stats {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return Stats{
