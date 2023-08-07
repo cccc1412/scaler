@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package serverless.model;
+
+option go_package = "github.org/modelproto";
+
+service Model {
+  rpc Predict (PredictRequest) returns (PredictResponse) {}
+}
+
+message PredictRequest {
+  string meta_key = 1;
+  repeated int32 sequences = 2;
+}
+
+message PredictResponse {
+  int32 result = 1;
+}

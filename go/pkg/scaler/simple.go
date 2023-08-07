@@ -20,9 +20,10 @@ import (
 	"log"
 	"sync"
 	"time"
-
+  "math"
 	"github.com/AliyunContainerService/scaler/go/pkg/config"
 	model2 "github.com/AliyunContainerService/scaler/go/pkg/model"
+  my_model "github.com/AliyunContainerService/scaler/go/pkg/lgbm"
 	platform_client2 "github.com/AliyunContainerService/scaler/go/pkg/platform_client"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -45,6 +46,7 @@ type Simple struct {
 	metaData       *model2.Meta
 	platformClient platform_client2.Client
 	mu             sync.Mutex
+  preload_mu     sync.Mutex
 	wg             sync.WaitGroup
 	instances      map[string]*model2.Instance //不包括idle
 	idleInstance   *list.List
@@ -64,6 +66,7 @@ type Simple struct {
   preloading_cnt int
   start_time     map[string]int64
   waiting_cnt    int
+  base           float64
 
   pred_running   int
   running_history RingBuffer 
@@ -85,13 +88,16 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
 		metaData:       metaData,
 		platformClient: client,
 		mu:             sync.Mutex{},
+    preload_mu:     sync.Mutex{},
 		wg:             sync.WaitGroup{},
 		instances:      make(map[string]*model2.Instance),
     start_time: make(map[string]int64),
 		idleInstance:   list.New(),
     preloadList: list.New(),
 
-    running_history:  *NewRingBuffer(50), 
+    running_history:  *NewRingBuffer(10), 
+    max_running: 1,
+    base: 0,
     p : 1,
     d : 0,
     q : 1,
@@ -263,22 +269,34 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest, req_tota
 	s.mu.Unlock()
 
   s.mu.Lock()
-  // pred_wait_time := math.Max(float64(s.waiting_cnt/s.running_cnt), 1) * float64(s.exe_time)
-  if(s.preloading_cnt > s.waiting_cnt || s.assign_time >= s.exe_time && s.metaData.GetTimeoutInSecs() * 1000 > uint32(s.exe_time) && s.waiting_cnt < s.running_cnt) {
+  s.metaData.Meta.MemoryInMb = request.MetaData.MemoryInMb
+  pred_wait_time := math.Max(float64(s.waiting_cnt/(s.running_cnt + 1)), 1) * float64(s.exe_time)
+  // if(s.preloading_cnt > s.waiting_cnt || s.assign_time >= s.exe_time && s.metaData.GetTimeoutInSecs() * 1000 > uint32(s.exe_time) && s.waiting_cnt < s.running_cnt) {
+  if(s.preloading_cnt > s.waiting_cnt || s.assign_time >= int64(pred_wait_time) && s.metaData.GetTimeoutInSecs()*1000 > uint32(pred_wait_time)){
     s.waiting_cnt++
     log.Printf("delay assign,metaKey : %s ,waiting_cnt : %d, running_cnt : %d, preloading_cnt : %d", s.metaData.Key, s.waiting_cnt, s.running_cnt, s.preloading_cnt)
     s.mu.Unlock()
+    // s.preload_mu.Lock()
+    if(s.preloading_cnt + s.running_cnt < s.waiting_cnt) {
+      for i:=0; i < int(5 * math.Pow(2, s.base)); i++ {
+        s.base++
+        go func() {
+          s.Preload(context.Background())
+        }()
+      }
+    }
+    // s.preload_mu.Unlock()
     return s.delayAssignLoop(request)    
   } else {
     s.mu.Unlock()
   }
 
-  s.metaData.Meta.MemoryInMb = request.MetaData.MemoryInMb
   // if(s.preloading_cnt == 0) {
-    for i:=0; i < 10; i++ {
-      go func() {
-        s.Preload(context.Background())
-      }()
+    for i:=0; i < int(5 * math.Pow(2, s.base)); i++ {
+        s.base++
+        go func() {
+          s.Preload(context.Background())
+        }()
     }
   // }
 	//Create new Instance
@@ -441,29 +459,29 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 	  if instance := s.instances[instanceId]; instance != nil {
 	  	slotId = instance.Slot.Id
 
-      if(s.waiting_cnt > 0) {
-        log.Printf("do not destroy, reason: s.waiting_cnt > 0")
-        instance.Busy = false
-        instance.LastIdleTime = start //keepalive start time
-	  	  s.idleInstance.PushFront(instance)
-        return reply, nil
-      }
+      // if(s.waiting_cnt > 0) {
+      //   log.Printf("do not destroy, reason: s.waiting_cnt > 0")
+      //   instance.Busy = false
+      //   instance.LastIdleTime = start //keepalive start time
+	  	  // s.idleInstance.PushFront(instance)
+      //   return reply, nil
+      // }
 
-      if(float32(s.reuse_cnt)/float32(s.assign_cnt) < 0.8) {
-        log.Printf("do not destroy, reason: float32(s.reuse_cnt)/float32(s.assign_cnt) < 0.8")
-        instance.Busy = false
-        instance.LastIdleTime = start //keepalive start time
-	  	  s.idleInstance.PushFront(instance)
-        return reply, nil
-      }
+      // if(float32(s.reuse_cnt)/float32(s.assign_cnt) < 0.8) {
+      //   log.Printf("do not destroy, reason: float32(s.reuse_cnt)/float32(s.assign_cnt) < 0.8")
+      //   instance.Busy = false
+      //   instance.LastIdleTime = start //keepalive start time
+	  	  // s.idleInstance.PushFront(instance)
+      //   return reply, nil
+      // }
 
-      if  instance.InitDurationInMs < int64(s.dt_time) && instance.InitDurationInMs < int64(s.hist.GetQuantiles(0.05)) { //初始化时间 < moving_ave dt && < 5%分位数
-        needDestroy = true
-        delete(s.instances, instanceId)
-        s.instance_cnt--
-        log.Printf("instance %s destroy, reason: instance.InitDurationInMs < moving_ave(dt), %d, %d", request.Assigment.RequestId, instance.InitDurationInMs, int64(s.dt_time))
-        return reply ,nil
-      }
+      // if  instance.InitDurationInMs < int64(s.dt_time) && instance.InitDurationInMs < int64(s.hist.GetQuantiles(0.05)) { //初始化时间 < moving_ave dt && < 5%分位数
+      //   needDestroy = true
+      //   delete(s.instances, instanceId)
+      //   s.instance_cnt--
+      //   log.Printf("instance %s destroy, reason: instance.InitDurationInMs < moving_ave(dt), %d, %d", request.Assigment.RequestId, instance.InitDurationInMs, int64(s.dt_time))
+      //   return reply ,nil
+      // }
 
       // if s.idleInstance.Len() > s.max_running { //当前idle个数大于最大并发量
       //   needDestroy = true
@@ -483,13 +501,13 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 
       // }
 
-      if s.pred_running < s.idleInstance.Len() && s.pred_running != 0 {
-        needDestroy = true
-        delete(s.instances, instanceId)
-        s.instance_cnt--
-        log.Printf("instance %s destroy, reason: s.pred_running < s.idleInstance.Len() , %d, %d", request.Assigment.RequestId, s.pred_running,s.idleInstance.Len())
-        return reply ,nil
-      }
+      // if s.pred_running < s.idleInstance.Len() && s.pred_running != 0 {
+      //   needDestroy = true
+      //   delete(s.instances, instanceId)
+      //   s.instance_cnt--
+      //   log.Printf("instance %s destroy, reason: s.pred_running < s.idleInstance.Len() , %d, %d", request.Assigment.RequestId, s.pred_running,s.idleInstance.Len())
+      //   return reply ,nil
+      // }
 
 	  	if needDestroy {
         delete(s.instances, instanceId)
@@ -551,12 +569,16 @@ func (s *Simple) gcLoop() {
           needgc = true
         }
         
-        if(s.idleInstance.Len() < s.max_running / 5) {
-          log.Printf("do not gc, reason : s.idleInstance.Len() < s.max_running / 5,  %d, %d", s.idleInstance.Len(), s.max_running / 5)
+        // if(s.idleInstance.Len() < s.max_running / 2) {
+        //   log.Printf("do not gc, reason : s.idleInstance.Len() < s.max_running / 5,  %d, %d", s.idleInstance.Len(), s.max_running / 5)
+        //   needgc = false
+        // }
+
+        if(s.pred_running > s.idleInstance.Len() + s.preloading_cnt + s.running_cnt) {
           needgc = false
         }
 
-        if(s.pred_running > s.idleInstance.Len()) {
+        if(s.max_running_interval > s.max_running / 2) {
           needgc = false
         }
 
@@ -596,18 +618,21 @@ func (s *Simple) preloadLoop() {
     s.running_history.Enqueue(s.max_running_interval) 
     needPreload := false
     preload_num := 1
+    s.base = 0
     data_for_arima := s.running_history.ToArray()
     if(len(data_for_arima) > 10) {
       for i := range(data_for_arima) {
         log.Printf("%d", data_for_arima[i])
       }
-      predictions := predictARIMA(intToFloatArray(data_for_arima), s.p, s.d, s.q, 1)
-      tmp := 0.0
-      end := data_for_arima[len(data_for_arima) - 1]
-      for _, pred := range predictions {
-        tmp += pred + float64(end)
-      }
-      s.pred_running = int(tmp / float64(len(predictions)))
+      // predictions := predictARIMA(intToFloatArray(data_for_arima), s.p, s.d, s.q, 1)
+      // tmp := 0.0
+      // end := data_for_arima[len(data_for_arima) - 1]
+      // for _, pred := range predictions {
+      //   tmp += pred + float64(end)
+      // }
+      // s.pred_running = int(tmp / float64(len(predictions)))
+      s.pred_running = int(my_model.Predict(s.metaData.Key ,intToInt32Array(data_for_arima)))
+      log.Printf("lgbm predict : %d", s.pred_running)
       if(s.preloading_cnt + s.idleInstance.Len() + s.running_cnt<  s.pred_running ) {
         needPreload = true
         preload_num = s.pred_running - s.idleInstance.Len() - s.running_cnt - s.preloading_cnt
@@ -621,7 +646,7 @@ func (s *Simple) preloadLoop() {
       }
     }
     s.max_running_interval = 0
-
+    // preload_num = int(math.Max(float64(preload_num), float64(2 * s.max_running - s.idleInstance.Len() - s.running_cnt - s.preloading_cnt)))
     // if(s.running_cnt > s.idleInstance.Len() && s.idleInstance.Len() == 0 && float64(s.dt_time) < float64(s.exe_time)) {
     //   log.Printf("prelod, reason :  s.running_cnt > s.idleInstance.Len() && s.idleInstance.Len() == 0 && float64(s.dt_time) < float64(s.exe_time)")
     //   needPreload = true

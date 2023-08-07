@@ -14,13 +14,14 @@ spec:
       restartPolicy: Never
       containers:
       - name: scaler
-        image:  registry.cn-shanghai.aliyuncs.com/2024-happy-hack/scaler:v1.1.3
+        image:  registry.cn-shanghai.aliyuncs.com/2024-happy-hack/scaler:v1.1.4
         command: ["./run.sh"]
       - name: serverless-simulator
-        image: registry.cn-beijing.aliyuncs.com/cloudnative-challenge/simulator:v3.3
+        # image: registry.cn-beijing.aliyuncs.com/cloudnative-challenge/simulator:v3.3
+        image:  registry.cn-shanghai.aliyuncs.com/2024-happy-hack/my_simulator:v1
         command: ["./run.sh" ]
         # 需要替换为选手希望测试的数据集名称，数据集的名称可以参考data/data_trainning.tar.gz解压后的目录结构
         # 不填写参数时，默认会测试所有的数据集
-        args: ["dataSet_2"]
+        args: ["dataSet_4"]
       imagePullSecrets:
       - name: xxxx

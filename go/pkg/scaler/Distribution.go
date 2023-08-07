@@ -97,6 +97,17 @@ func intToFloatArray(intArray []int) []float64 {
 
 	return floatArray
 }
+
+func intToInt32Array(intArray []int) []int32 {
+	floatArray := make([]int32, len(intArray))
+
+	for i, val := range intArray {
+		floatArray[i] = int32(val)
+	}
+
+	return floatArray
+}
+
 type Distribution struct {
     assgin_ts RingBuffer
     idle_ts RingBuffer  
