@@ -27,6 +27,7 @@ import (
 )
 
 type Server struct {
+  req_total int
 	pb.UnimplementedScalerServer
 	mgr *manager.Manager
 }
@@ -49,7 +50,8 @@ func (s *Server) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 		},
 	}
 	scheduler := s.mgr.GetOrCreate(metaData)
-	return scheduler.Assign(ctx, request)
+  s.req_total ++
+	return scheduler.Assign(ctx, request, s.req_total)
 }
 
 func (s *Server) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleReply, error) {

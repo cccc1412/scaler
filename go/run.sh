@@ -1,5 +1,8 @@
 #!/bin/bash
 
+python model_server.py &
+echo "Model server is starting..."
+
 ./scaler &
 echo "Scaler is starting..."
 

@@ -3,3 +3,10 @@ _output
 /data/data_training/
 /scaler
 /manifest/serverless-simulaion-test.yaml
+/manifest/deployment.yaml
+.DS_Store
+run.sh
+shutdown.sh
+/go/python/data/*
+/go/python/model/*
+/go/python/init_data/*

@@ -31,4 +31,7 @@ type Instance struct {
 	InitDurationInMs int64
 	Busy             bool
 	LastIdleTime     time.Time
+  ExeStartTime     time.Time
 }
+
+

@@ -19,11 +19,13 @@ import (
 	"net"
 
 	"google.golang.org/grpc"
-
+  model "github.com/AliyunContainerService/scaler/go/pkg/lgbm"
 	pb "github.com/AliyunContainerService/scaler/proto"
 )
 
 func main() {
+  model.Init()
+  log.Printf("Predict result: %d", model.Predict("certificatesigningrequests2", []int32{1, 2, 3, 4, 5, 1, 2, 3, 4, 5}))
 	lis, err := net.Listen("tcp", ":9001")
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)

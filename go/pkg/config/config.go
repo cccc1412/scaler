@@ -17,12 +17,24 @@ import "time"
 
 type Config struct {
 	ClientAddr           string
+	KeepAliveInterval    int //ms 
+  // PreloadInterval      int
+  GcDuration           time.Duration
+  PreloadDuration      time.Duration
+}
+
+type ConfigD3 struct {
+	ClientAddr           string
 	GcInterval           time.Duration
 	IdleDurationBeforeGC time.Duration
 }
 
 var DefaultConfig = Config{
 	ClientAddr:           "127.0.0.1:50051",
-	GcInterval:           10 * time.Second,
-	IdleDurationBeforeGC: 5 * time.Minute,
+	KeepAliveInterval:    360 * 1000,
+  // PreloadInterval:       0, 
+  GcDuration: 1 * 1000 * time.Millisecond,
+  PreloadDuration: 90 * 1000 * time.Millisecond,
 }
+
+
